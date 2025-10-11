@@ -1,0 +1,30 @@
+{
+  "name": "s7-1500-opcua-client",
+  "version": "1.0.0",
+  "description": "OPC UA Client API for S7-1500 PLC",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "test": "node src/test.js"
+  },
+  "keywords": [
+    "opcua",
+    "s7-1500",
+    "plc",
+    "siemens",
+    "api"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "node-opcua": "^2.119.0",
+    "dotenv": "^16.3.1",
+    "winston": "^3.11.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}
