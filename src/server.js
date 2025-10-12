@@ -70,10 +70,10 @@ app.use((req, res) => {
 });
 
 // Start server
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   logger.info(`OPC UA API Server running on port ${PORT}`);
-  logger.info(`Health check: http://localhost:${PORT}/health`);
-  logger.info(`API documentation: http://localhost:${PORT}/`);
+  logger.info(`Health check: http://0.0.0.0:${PORT}/health`);
+  logger.info(`API documentation: http://0.0.0.0:${PORT}/`);
 });
 
 // Graceful shutdown
