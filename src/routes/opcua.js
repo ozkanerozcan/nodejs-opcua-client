@@ -286,7 +286,10 @@ router.post('/write-registered', async (req, res) => {
   try {
     const { registeredId, value, dataType } = req.body;
 
+    logger.info('Write registered request:', { registeredId, value, dataType });
+
     if (!registeredId || value === undefined || value === null) {
+      logger.error('Missing required fields:', { registeredId, value });
       return res.status(400).json({
         success: false,
         error: 'registeredId and value are required'

@@ -414,8 +414,10 @@ class OPCUAClientManager {
 
       const nodeInfo = this.registeredNodes.get(registeredId);
       if (!nodeInfo) {
-        throw new Error('Registered node not found');
+        throw new Error(`Registered node not found: ${registeredId}`);
       }
+
+      logger.info(`Writing to registered node: ${registeredId}, value: ${value}, dataType: ${dataType}`);
 
       // Map dataType string to DataType enum
       const dataTypeMap = {
@@ -427,13 +429,31 @@ class OPCUAClientManager {
         'String': DataType.String
       };
 
+      // Parse value based on dataType
+      let parsedValue = value;
+      if (dataType === 'Boolean') {
+        parsedValue = value === 'true' || value === true || value === '1' || value === 1;
+      } else if (dataType === 'Int16' || dataType === 'Int32') {
+        parsedValue = parseInt(value, 10);
+        if (isNaN(parsedValue)) {
+          throw new Error(`Invalid integer value: ${value}`);
+        }
+      } else if (dataType === 'Float' || dataType === 'Double') {
+        parsedValue = parseFloat(value);
+        if (isNaN(parsedValue)) {
+          throw new Error(`Invalid numeric value: ${value}`);
+        }
+      } else if (dataType === 'String') {
+        parsedValue = String(value);
+      }
+
       const nodeToWrite = {
         nodeId: registeredId,
         attributeId: AttributeIds.Value,
         value: {
           value: {
             dataType: dataTypeMap[dataType] || DataType.Double,
-            value: value
+            value: parsedValue
           }
         }
       };
@@ -441,6 +461,7 @@ class OPCUAClientManager {
       const statusCode = await this.session.write(nodeToWrite);
 
       if (statusCode.isGood()) {
+        logger.info(`Write successful to ${registeredId}`);
         return {
           success: true,
           message: 'Value written successfully',
