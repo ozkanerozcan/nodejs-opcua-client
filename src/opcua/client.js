@@ -16,6 +16,8 @@ class OPCUAClientManager {
     this.isConnected = false;
     this.connectionConfig = null;
     this.subscriptions = new Map();
+    this.registeredNodes = new Map(); // Store registered nodes
+    this.nextRegisteredId = 1; // Counter for registered node IDs
   }
 
   /**
@@ -295,6 +297,181 @@ class OPCUAClientManager {
   }
 
   /**
+   * Register a node for efficient repeated access
+   * OPC UA servers can optimize access to registered nodes
+   */
+  async registerNode(nodeId) {
+    try {
+      if (!this.isConnected || !this.session) {
+        throw new Error('Not connected to PLC');
+      }
+
+      // Register node with OPC UA server
+      const registeredNodeIds = await this.session.registerNodes([nodeId]);
+      
+      if (!registeredNodeIds || registeredNodeIds.length === 0) {
+        throw new Error('Failed to register node on server');
+      }
+
+      // Store mapping with our internal ID
+      const registeredId = this.nextRegisteredId++;
+      this.registeredNodes.set(registeredId, {
+        nodeId: nodeId,
+        serverRegisteredNodeId: registeredNodeIds[0].toString(),
+        registeredAt: new Date().toISOString()
+      });
+
+      logger.info(`Node registered: ${nodeId} -> ID: ${registeredId}`);
+
+      return {
+        success: true,
+        registeredId: registeredId,
+        nodeId: nodeId,
+        message: 'Node registered successfully'
+      };
+    } catch (error) {
+      logger.error('Register node error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Unregister a node
+   */
+  async unregisterNode(registeredId) {
+    try {
+      if (!this.isConnected || !this.session) {
+        throw new Error('Not connected to PLC');
+      }
+
+      const nodeInfo = this.registeredNodes.get(registeredId);
+      if (!nodeInfo) {
+        throw new Error('Registered node not found');
+      }
+
+      // Unregister from OPC UA server
+      await this.session.unregisterNodes([nodeInfo.serverRegisteredNodeId]);
+      
+      // Remove from our map
+      this.registeredNodes.delete(registeredId);
+
+      logger.info(`Node unregistered: ID ${registeredId}`);
+
+      return {
+        success: true,
+        message: 'Node unregistered successfully'
+      };
+    } catch (error) {
+      logger.error('Unregister node error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Read from a registered node (more efficient)
+   */
+  async readRegisteredNode(registeredId) {
+    try {
+      if (!this.isConnected || !this.session) {
+        throw new Error('Not connected to PLC');
+      }
+
+      const nodeInfo = this.registeredNodes.get(registeredId);
+      if (!nodeInfo) {
+        throw new Error('Registered node not found');
+      }
+
+      // Use the server-registered node ID for reading
+      const dataValue = await this.session.read({
+        nodeId: nodeInfo.serverRegisteredNodeId,
+        attributeId: AttributeIds.Value
+      });
+
+      if (dataValue.statusCode.isGood()) {
+        return {
+          success: true,
+          value: dataValue.value.value,
+          dataType: DataType[dataValue.value.dataType],
+          statusCode: dataValue.statusCode.toString(),
+          timestamp: dataValue.serverTimestamp || new Date().toISOString()
+        };
+      } else {
+        throw new Error(`Read failed: ${dataValue.statusCode.toString()}`);
+      }
+    } catch (error) {
+      logger.error('Read registered node error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Write to a registered node (more efficient)
+   */
+  async writeRegisteredNode(registeredId, value, dataType = 'Double') {
+    try {
+      if (!this.isConnected || !this.session) {
+        throw new Error('Not connected to PLC');
+      }
+
+      const nodeInfo = this.registeredNodes.get(registeredId);
+      if (!nodeInfo) {
+        throw new Error('Registered node not found');
+      }
+
+      // Map dataType string to DataType enum
+      const dataTypeMap = {
+        'Boolean': DataType.Boolean,
+        'Int16': DataType.Int16,
+        'Int32': DataType.Int32,
+        'Float': DataType.Float,
+        'Double': DataType.Double,
+        'String': DataType.String
+      };
+
+      const nodeToWrite = {
+        nodeId: nodeInfo.serverRegisteredNodeId,
+        attributeId: AttributeIds.Value,
+        value: {
+          value: {
+            dataType: dataTypeMap[dataType] || DataType.Double,
+            value: value
+          }
+        }
+      };
+
+      const statusCode = await this.session.write(nodeToWrite);
+
+      if (statusCode.isGood()) {
+        return {
+          success: true,
+          message: 'Value written successfully',
+          statusCode: statusCode.toString()
+        };
+      } else {
+        throw new Error(`Write failed: ${statusCode.toString()}`);
+      }
+    } catch (error) {
+      logger.error('Write registered node error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get all registered nodes
+   */
+  getRegisteredNodes() {
+    const nodes = [];
+    for (const [id, info] of this.registeredNodes) {
+      nodes.push({
+        registeredId: id,
+        nodeId: info.nodeId,
+        registeredAt: info.registeredAt
+      });
+    }
+    return nodes;
+  }
+
+  /**
    * Get connection status
    */
   getStatus() {
@@ -310,6 +487,19 @@ class OPCUAClientManager {
    */
   async cleanup() {
     try {
+      // Unregister all nodes
+      if (this.session && this.registeredNodes.size > 0) {
+        try {
+          const nodeIds = Array.from(this.registeredNodes.values()).map(n => n.serverRegisteredNodeId);
+          await this.session.unregisterNodes(nodeIds);
+          logger.info('All registered nodes unregistered');
+        } catch (err) {
+          logger.error('Error unregistering nodes:', err);
+        }
+      }
+      this.registeredNodes.clear();
+      this.nextRegisteredId = 1;
+
       // Terminate all subscriptions
       for (const [id, sub] of this.subscriptions) {
         try {
@@ -341,6 +531,8 @@ class OPCUAClientManager {
       this.session = null;
       this.isConnected = false;
       this.connectionConfig = null;
+      this.registeredNodes.clear();
+      this.nextRegisteredId = 1;
     }
   }
 }

@@ -220,6 +220,96 @@ Response:
 }
 ```
 
+### Register Node (Efficient Access)
+```http
+POST /api/opcua/register
+Content-Type: application/json
+
+{
+  "nodeId": "ns=3;s=\"DB1\".\"Temperature\""
+}
+
+Response:
+{
+  "success": true,
+  "registeredId": 1,
+  "nodeId": "ns=3;s=\"DB1\".\"Temperature\"",
+  "message": "Node registered successfully"
+}
+```
+
+### Unregister Node
+```http
+POST /api/opcua/unregister
+Content-Type: application/json
+
+{
+  "registeredId": 1
+}
+
+Response:
+{
+  "success": true,
+  "message": "Node unregistered successfully"
+}
+```
+
+### Read Registered Node
+```http
+POST /api/opcua/read-registered
+Content-Type: application/json
+
+{
+  "registeredId": 1
+}
+
+Response:
+{
+  "success": true,
+  "value": 25.5,
+  "dataType": "Double",
+  "statusCode": "Good (0x00000)",
+  "timestamp": "2024-01-10T14:30:00.000Z"
+}
+```
+
+### Write Registered Node
+```http
+POST /api/opcua/write-registered
+Content-Type: application/json
+
+{
+  "registeredId": 1,
+  "value": 30.5,
+  "dataType": "Double"
+}
+
+Response:
+{
+  "success": true,
+  "message": "Value written successfully",
+  "statusCode": "Good (0x00000)"
+}
+```
+
+### Get Registered Nodes List
+```http
+GET /api/opcua/registered-nodes
+
+Response:
+{
+  "success": true,
+  "nodes": [
+    {
+      "registeredId": 1,
+      "nodeId": "ns=3;s=\"DB1\".\"Temperature\"",
+      "registeredAt": "2024-01-10T14:30:00.000Z"
+    }
+  ],
+  "count": 1
+}
+```
+
 ## 🔧 Configuration
 
 ### Environment Variables
