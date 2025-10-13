@@ -151,23 +151,39 @@ class OPCUAClientManager {
         throw new Error('Not connected to PLC');
       }
 
-      // Map dataType string to DataType enum
-      const dataTypeMap = {
-        'Boolean': DataType.Boolean,
-        'Int16': DataType.Int16,
-        'Int32': DataType.Int32,
-        'Float': DataType.Float,
-        'Double': DataType.Double,
-        'String': DataType.String
-      };
+      // Map dataType string to DataType enum (support various OPC UA type names)
+      const dataTypeLower = (dataType || 'Double').toLowerCase();
+      let mappedDataType = DataType.Double; // default
+      let parsedValue = value;
+
+      if (dataTypeLower.includes('bool')) {
+        mappedDataType = DataType.Boolean;
+      } else if (dataTypeLower.includes('byte') || dataTypeLower.includes('sbyte')) {
+        mappedDataType = DataType.Byte;
+      } else if (dataTypeLower.includes('int16')) {
+        mappedDataType = DataType.Int16;
+      } else if (dataTypeLower.includes('uint16') || dataTypeLower.includes('word')) {
+        mappedDataType = DataType.UInt16;
+      } else if (dataTypeLower.includes('int32') || dataTypeLower.includes('int') || dataTypeLower.includes('dint')) {
+        mappedDataType = DataType.Int32;
+      } else if (dataTypeLower.includes('uint32') || dataTypeLower.includes('dword')) {
+        mappedDataType = DataType.UInt32;
+      } else if (dataTypeLower.includes('float') || dataTypeLower.includes('real')) {
+        mappedDataType = DataType.Float;
+      } else if (dataTypeLower.includes('double') || dataTypeLower.includes('lreal')) {
+        mappedDataType = DataType.Double;
+      } else if (dataTypeLower.includes('string')) {
+        mappedDataType = DataType.String;
+        parsedValue = String(value);
+      }
 
       const nodeToWrite = {
         nodeId: nodeId,
         attributeId: AttributeIds.Value,
         value: {
           value: {
-            dataType: dataTypeMap[dataType] || DataType.Double,
-            value: value
+            dataType: mappedDataType,
+            value: parsedValue
           }
         }
       };
@@ -305,6 +321,25 @@ class OPCUAClientManager {
         throw new Error('Not connected to PLC');
       }
 
+      logger.info(`Attempting to register node: ${nodeId}`);
+
+      // First, try to read the node to verify it exists and is accessible
+      try {
+        const testRead = await this.session.read({
+          nodeId: nodeId,
+          attributeId: AttributeIds.Value
+        });
+
+        if (!testRead.statusCode.isGood()) {
+          throw new Error(`Node not accessible: ${testRead.statusCode.toString()}. The variable may not exist in PLC or is not accessible.`);
+        }
+
+        logger.info(`Node verified successfully: ${nodeId}`);
+      } catch (readError) {
+        logger.error(`Failed to verify node: ${nodeId}`, readError);
+        throw new Error(`Cannot register node: ${nodeId}. ${readError.message || 'Node does not exist or is not accessible in PLC.'}`);
+      }
+
       // Register node with OPC UA server
       const registeredNodeIds = await this.session.registerNodes([nodeId]);
       
@@ -419,31 +454,37 @@ class OPCUAClientManager {
 
       logger.info(`Writing to registered node: ${registeredId}, value: ${value}, dataType: ${dataType}`);
 
-      // Map dataType string to DataType enum
-      const dataTypeMap = {
-        'Boolean': DataType.Boolean,
-        'Int16': DataType.Int16,
-        'Int32': DataType.Int32,
-        'Float': DataType.Float,
-        'Double': DataType.Double,
-        'String': DataType.String
-      };
-
-      // Parse value based on dataType
+      // Map dataType string to DataType enum (support various OPC UA type names)
+      const dataTypeLower = (dataType || 'Double').toLowerCase();
+      let mappedDataType = DataType.Double; // default
       let parsedValue = value;
-      if (dataType === 'Boolean') {
-        parsedValue = value === 'true' || value === true || value === '1' || value === 1;
-      } else if (dataType === 'Int16' || dataType === 'Int32') {
-        parsedValue = parseInt(value, 10);
-        if (isNaN(parsedValue)) {
-          throw new Error(`Invalid integer value: ${value}`);
-        }
-      } else if (dataType === 'Float' || dataType === 'Double') {
-        parsedValue = parseFloat(value);
-        if (isNaN(parsedValue)) {
-          throw new Error(`Invalid numeric value: ${value}`);
-        }
-      } else if (dataType === 'String') {
+
+      if (dataTypeLower.includes('bool')) {
+        mappedDataType = DataType.Boolean;
+        // No parsing needed, value should already be boolean
+      } else if (dataTypeLower.includes('byte') || dataTypeLower.includes('sbyte')) {
+        mappedDataType = DataType.Byte;
+        // No parsing needed, value should already be number
+      } else if (dataTypeLower.includes('int16')) {
+        mappedDataType = DataType.Int16;
+        // No parsing needed
+      } else if (dataTypeLower.includes('uint16') || dataTypeLower.includes('word')) {
+        mappedDataType = DataType.UInt16;
+        // No parsing needed
+      } else if (dataTypeLower.includes('int32') || dataTypeLower.includes('int') || dataTypeLower.includes('dint')) {
+        mappedDataType = DataType.Int32;
+        // No parsing needed
+      } else if (dataTypeLower.includes('uint32') || dataTypeLower.includes('dword')) {
+        mappedDataType = DataType.UInt32;
+        // No parsing needed
+      } else if (dataTypeLower.includes('float') || dataTypeLower.includes('real')) {
+        mappedDataType = DataType.Float;
+        // No parsing needed
+      } else if (dataTypeLower.includes('double') || dataTypeLower.includes('lreal')) {
+        mappedDataType = DataType.Double;
+        // No parsing needed
+      } else if (dataTypeLower.includes('string')) {
+        mappedDataType = DataType.String;
         parsedValue = String(value);
       }
 
@@ -452,7 +493,7 @@ class OPCUAClientManager {
         attributeId: AttributeIds.Value,
         value: {
           value: {
-            dataType: dataTypeMap[dataType] || DataType.Double,
+            dataType: mappedDataType,
             value: parsedValue
           }
         }
