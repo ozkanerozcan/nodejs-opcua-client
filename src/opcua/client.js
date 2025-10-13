@@ -16,8 +16,7 @@ class OPCUAClientManager {
     this.isConnected = false;
     this.connectionConfig = null;
     this.subscriptions = new Map();
-    this.registeredNodes = new Map(); // Store registered nodes
-    this.nextRegisteredId = 1; // Counter for registered node IDs
+    this.registeredNodes = new Map(); // Store registered nodes: Map<serverNodeId, originalNodeId>
   }
 
   /**
@@ -313,19 +312,19 @@ class OPCUAClientManager {
         throw new Error('Failed to register node on server');
       }
 
-      // Store mapping with our internal ID
-      const registeredId = this.nextRegisteredId++;
-      this.registeredNodes.set(registeredId, {
-        nodeId: nodeId,
-        serverRegisteredNodeId: registeredNodeIds[0].toString(),
+      const serverRegisteredNodeId = registeredNodeIds[0].toString();
+      
+      // Store mapping: server's registered ID -> original nodeId
+      this.registeredNodes.set(serverRegisteredNodeId, {
+        originalNodeId: nodeId,
         registeredAt: new Date().toISOString()
       });
 
-      logger.info(`Node registered: ${nodeId} -> ID: ${registeredId}`);
+      logger.info(`Node registered: ${nodeId} -> Server ID: ${serverRegisteredNodeId}`);
 
       return {
         success: true,
-        registeredId: registeredId,
+        registeredId: serverRegisteredNodeId,
         nodeId: nodeId,
         message: 'Node registered successfully'
       };
@@ -350,12 +349,12 @@ class OPCUAClientManager {
       }
 
       // Unregister from OPC UA server
-      await this.session.unregisterNodes([nodeInfo.serverRegisteredNodeId]);
+      await this.session.unregisterNodes([registeredId]);
       
       // Remove from our map
       this.registeredNodes.delete(registeredId);
 
-      logger.info(`Node unregistered: ID ${registeredId}`);
+      logger.info(`Node unregistered: ${nodeInfo.originalNodeId}`);
 
       return {
         success: true,
@@ -383,7 +382,7 @@ class OPCUAClientManager {
 
       // Use the server-registered node ID for reading
       const dataValue = await this.session.read({
-        nodeId: nodeInfo.serverRegisteredNodeId,
+        nodeId: registeredId,
         attributeId: AttributeIds.Value
       });
 
@@ -429,7 +428,7 @@ class OPCUAClientManager {
       };
 
       const nodeToWrite = {
-        nodeId: nodeInfo.serverRegisteredNodeId,
+        nodeId: registeredId,
         attributeId: AttributeIds.Value,
         value: {
           value: {
@@ -461,10 +460,10 @@ class OPCUAClientManager {
    */
   getRegisteredNodes() {
     const nodes = [];
-    for (const [id, info] of this.registeredNodes) {
+    for (const [registeredId, info] of this.registeredNodes) {
       nodes.push({
-        registeredId: id,
-        nodeId: info.nodeId,
+        registeredId: registeredId,
+        nodeId: info.originalNodeId,
         registeredAt: info.registeredAt
       });
     }
@@ -490,7 +489,7 @@ class OPCUAClientManager {
       // Unregister all nodes
       if (this.session && this.registeredNodes.size > 0) {
         try {
-          const nodeIds = Array.from(this.registeredNodes.values()).map(n => n.serverRegisteredNodeId);
+          const nodeIds = Array.from(this.registeredNodes.keys());
           await this.session.unregisterNodes(nodeIds);
           logger.info('All registered nodes unregistered');
         } catch (err) {
@@ -498,7 +497,6 @@ class OPCUAClientManager {
         }
       }
       this.registeredNodes.clear();
-      this.nextRegisteredId = 1;
 
       // Terminate all subscriptions
       for (const [id, sub] of this.subscriptions) {
@@ -532,7 +530,6 @@ class OPCUAClientManager {
       this.isConnected = false;
       this.connectionConfig = null;
       this.registeredNodes.clear();
-      this.nextRegisteredId = 1;
     }
   }
 }
