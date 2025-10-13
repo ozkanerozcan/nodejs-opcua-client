@@ -328,4 +328,48 @@ router.get('/registered-nodes', (req, res) => {
   }
 });
 
+/**
+ * POST /api/opcua/subscribe-registered
+ * Subscribe to a registered node for real-time updates
+ */
+router.post('/subscribe-registered', async (req, res) => {
+  try {
+    const { registeredId, interval } = req.body;
+
+    if (!registeredId) {
+      return res.status(400).json({
+        success: false,
+        error: 'registeredId is required'
+      });
+    }
+
+    const result = await opcuaClient.subscribeRegisteredNode(registeredId, interval || 1000);
+    res.json(result);
+  } catch (error) {
+    logger.error('Subscribe registered node endpoint error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to create subscription'
+    });
+  }
+});
+
+/**
+ * GET /api/opcua/subscription-value/:subscriptionId
+ * Get latest value from a subscription
+ */
+router.get('/subscription-value/:subscriptionId', (req, res) => {
+  try {
+    const { subscriptionId } = req.params;
+    const result = opcuaClient.getSubscriptionValue(subscriptionId);
+    res.json(result);
+  } catch (error) {
+    logger.error('Get subscription value endpoint error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 module.exports = router;

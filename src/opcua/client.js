@@ -533,6 +533,93 @@ class OPCUAClientManager {
   }
 
   /**
+   * Subscribe to a registered node (for real-time monitoring)
+   */
+  async subscribeRegisteredNode(registeredId, interval = 1000) {
+    try {
+      if (!this.isConnected || !this.session) {
+        throw new Error('Not connected to PLC');
+      }
+
+      const nodeInfo = this.registeredNodes.get(registeredId);
+      if (!nodeInfo) {
+        throw new Error('Registered node not found');
+      }
+
+      logger.info(`Subscribing to registered node: ${registeredId}, interval: ${interval}ms`);
+
+      const subscription = await this.session.createSubscription2({
+        requestedPublishingInterval: interval,
+        requestedLifetimeCount: 100,
+        requestedMaxKeepAliveCount: 10,
+        maxNotificationsPerPublish: 100,
+        publishingEnabled: true,
+        priority: 10
+      });
+
+      const monitoredItem = await subscription.monitor(
+        {
+          nodeId: registeredId, // Use registered node ID for better performance
+          attributeId: AttributeIds.Value
+        },
+        {
+          samplingInterval: interval,
+          discardOldest: true,
+          queueSize: 10
+        }
+      );
+
+      const subscriptionId = `sub_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      this.subscriptions.set(subscriptionId, {
+        subscription,
+        monitoredItem,
+        nodeId: registeredId,
+        originalNodeId: nodeInfo.originalNodeId,
+        isRegistered: true
+      });
+
+      // Handle data changes
+      monitoredItem.on('changed', (dataValue) => {
+        logger.info(`Value changed for registered node ${registeredId}:`, {
+          value: dataValue.value.value,
+          timestamp: dataValue.serverTimestamp
+        });
+        // Store latest value for polling
+        this.subscriptions.get(subscriptionId).latestValue = {
+          value: dataValue.value.value,
+          dataType: DataType[dataValue.value.dataType],
+          timestamp: dataValue.serverTimestamp || new Date().toISOString()
+        };
+      });
+
+      logger.info(`Subscription created: ${subscriptionId}`);
+
+      return {
+        success: true,
+        subscriptionId: subscriptionId,
+        message: 'Subscription created successfully'
+      };
+    } catch (error) {
+      logger.error('Subscribe registered node error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get latest value from subscription
+   */
+  getSubscriptionValue(subscriptionId) {
+    const sub = this.subscriptions.get(subscriptionId);
+    if (!sub) {
+      return { success: false, error: 'Subscription not found' };
+    }
+    return {
+      success: true,
+      value: sub.latestValue || null
+    };
+  }
+
+  /**
    * Get connection status
    */
   getStatus() {
