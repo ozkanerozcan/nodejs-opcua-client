@@ -6,7 +6,8 @@ const {
   AttributeIds,
   ClientSession,
   DataType,
-  MonitoringMode
+  MonitoringMode,
+  NodeClass
 } = require('node-opcua');
 const logger = require('../utils/logger');
 
@@ -267,13 +268,33 @@ class OPCUAClientManager {
 
       const browseResult = await this.session.browse(nodeId);
       
+      // Helper function to convert NodeClass enum to string
+      const getNodeClassName = (nodeClass) => {
+        const nodeClassMap = {
+          [NodeClass.Object]: 'Object',
+          [NodeClass.Variable]: 'Variable',
+          [NodeClass.Method]: 'Method',
+          [NodeClass.ObjectType]: 'ObjectType',
+          [NodeClass.VariableType]: 'VariableType',
+          [NodeClass.ReferenceType]: 'ReferenceType',
+          [NodeClass.DataType]: 'DataType',
+          [NodeClass.View]: 'View'
+        };
+        return nodeClassMap[nodeClass] || 'Unknown';
+      };
+      
       const nodes = browseResult.references.map(ref => ({
         nodeId: ref.nodeId.toString(),
         browseName: ref.browseName.toString(),
-        displayName: ref.displayName?.text || '',
-        nodeClass: ref.nodeClass.toString(),
+        displayName: ref.displayName?.text || ref.browseName.toString(),
+        nodeClass: getNodeClassName(ref.nodeClass),
         isForward: ref.isForward
       }));
+
+      logger.info(`Browse result: Found ${nodes.length} nodes under ${nodeId}`);
+      if (nodes.length > 0) {
+        logger.info(`First node sample: ${JSON.stringify(nodes[0])}`);
+      }
 
       return {
         success: true,
