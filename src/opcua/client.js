@@ -5,7 +5,8 @@ const {
   UserTokenType,
   AttributeIds,
   ClientSession,
-  DataType
+  DataType,
+  MonitoringMode
 } = require('node-opcua');
 const logger = require('../utils/logger');
 
@@ -261,7 +262,8 @@ class OPCUAClientManager {
           samplingInterval: interval,
           discardOldest: true,
           queueSize: 10
-        }
+        },
+        MonitoringMode.Reporting
       );
 
       const subscriptionId = `sub_${Date.now()}`;
@@ -566,7 +568,8 @@ class OPCUAClientManager {
           samplingInterval: interval,
           discardOldest: true,
           queueSize: 10
-        }
+        },
+        MonitoringMode.Reporting
       );
 
       const subscriptionId = `sub_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
