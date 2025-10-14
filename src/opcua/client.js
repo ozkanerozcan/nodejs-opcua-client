@@ -385,17 +385,40 @@ class OPCUAClientManager {
         throw new Error('Registered node not found');
       }
 
+      // Find and terminate all subscriptions for this node
+      const subscriptionsToDelete = [];
+      for (const [subscriptionId, sub] of this.subscriptions) {
+        if (sub.nodeId === registeredId) {
+          subscriptionsToDelete.push(subscriptionId);
+        }
+      }
+
+      // Terminate subscriptions
+      for (const subscriptionId of subscriptionsToDelete) {
+        try {
+          const sub = this.subscriptions.get(subscriptionId);
+          if (sub && sub.subscription) {
+            await sub.subscription.terminate();
+          }
+          this.subscriptions.delete(subscriptionId);
+          logger.info(`Terminated subscription ${subscriptionId} for node ${registeredId}`);
+        } catch (subError) {
+          logger.error(`Error terminating subscription ${subscriptionId}:`, subError);
+        }
+      }
+
       // Unregister from OPC UA server
       await this.session.unregisterNodes([registeredId]);
       
       // Remove from our map
       this.registeredNodes.delete(registeredId);
 
-      logger.info(`Node unregistered: ${nodeInfo.originalNodeId}`);
+      logger.info(`Node unregistered: ${nodeInfo.originalNodeId}, ${subscriptionsToDelete.length} subscription(s) terminated`);
 
       return {
         success: true,
-        message: 'Node unregistered successfully'
+        message: 'Node unregistered successfully',
+        terminatedSubscriptions: subscriptionsToDelete.length
       };
     } catch (error) {
       logger.error('Unregister node error:', error);
