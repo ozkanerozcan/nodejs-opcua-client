@@ -391,7 +391,7 @@ class OPCUAClientManager {
   }
 
   /**
-   * Search nodes by name (searches from multiple starting points)
+   * Search nodes by name (searches from multiple starting points and recursively)
    */
   async searchNodesByName(searchTerm) {
     try {
@@ -399,6 +399,7 @@ class OPCUAClientManager {
       
       logger.info(`Searching for nodes matching: ${searchTerm}`);
       const results = [];
+      const searchLower = searchTerm.toLowerCase();
       
       // Try common starting points
       const startingPoints = [
@@ -406,12 +407,46 @@ class OPCUAClientManager {
         { nodeId: 'ns=3;s=DataBlocksGlobal', path: 'DataBlocksGlobal' },
       ];
 
-      // Try direct path translation first
+      // Helper function to recursively search in nodes
+      const searchInNode = async (nodeId, currentPath, depth = 0) => {
+        if (depth > 3) return; // Limit depth to avoid long searches
+        
+        try {
+          const browseResult = await this.browseNodes(nodeId);
+          if (!browseResult.success) return;
+          
+          for (const node of browseResult.nodes) {
+            const matchesSearch = 
+              node.displayName.toLowerCase().includes(searchLower) ||
+              node.browseName.toLowerCase().includes(searchLower);
+            
+            if (matchesSearch) {
+              // Get children of matched node
+              const children = await this.browseNodes(node.nodeId);
+              results.push({
+                ...node,
+                path: `${currentPath}.${node.displayName}`,
+                children: children.success ? children.nodes : []
+              });
+            }
+            
+            // If it's an Object, search recursively inside it
+            const nodeClassStr = node.nodeClass?.toString() || '';
+            const isObject = nodeClassStr === 'Object' || nodeClassStr === '1';
+            if (isObject && depth < 2) {
+              await searchInNode(node.nodeId, `${currentPath}.${node.displayName}`, depth + 1);
+            }
+          }
+        } catch (err) {
+          logger.warn(`Search error in ${currentPath}:`, err.message);
+        }
+      };
+
+      // Try direct path translation first (e.g., "DB_Data")
       for (const start of startingPoints) {
         try {
           const translateResult = await this.translateBrowsePath(searchTerm, start.nodeId);
           if (translateResult.success) {
-            // Browse the found node to get its details
             const browseResult = await this.browseNodes(translateResult.nodeId);
             if (browseResult.success) {
               results.push({
@@ -425,35 +460,24 @@ class OPCUAClientManager {
             }
           }
         } catch (err) {
-          logger.warn(`Search failed at ${start.path}:`, err.message);
+          logger.warn(`Direct translate failed at ${start.path}:`, err.message);
         }
       }
 
-      // If direct path didn't work, try searching in DataBlocksGlobal
+      // If no exact match, search recursively
       if (results.length === 0) {
-        try {
-          const dbResult = await this.browseNodes('ns=3;s=DataBlocksGlobal');
-          if (dbResult.success) {
-            const matched = dbResult.nodes.filter(node => 
-              node.displayName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-              node.browseName.toLowerCase().includes(searchTerm.toLowerCase())
-            );
-            
-            for (const node of matched) {
-              const children = await this.browseNodes(node.nodeId);
-              results.push({
-                ...node,
-                path: `DataBlocksGlobal.${node.displayName}`,
-                children: children.success ? children.nodes : []
-              });
-            }
-          }
-        } catch (err) {
-          logger.warn('Search in DataBlocksGlobal failed:', err.message);
+        for (const start of startingPoints) {
+          await searchInNode(start.nodeId, start.path, 0);
         }
       }
 
-      return { success: true, results };
+      // Remove duplicates based on nodeId
+      const uniqueResults = results.filter((result, index, self) =>
+        index === self.findIndex((r) => r.nodeId === result.nodeId)
+      );
+
+      logger.info(`Search completed: found ${uniqueResults.length} results`);
+      return { success: true, results: uniqueResults };
     } catch (error) {
       logger.error('Search nodes error:', error);
       throw error;
