@@ -9,7 +9,8 @@ const {
   MonitoringMode,
   NodeClass,
   BrowseDirection,
-  makeNodeId
+  makeNodeId,
+  resolveNodeId
 } = require('node-opcua');
 const logger = require('../utils/logger');
 
@@ -270,12 +271,14 @@ class OPCUAClientManager {
 
       logger.info(`Browsing node: ${nodeId}`);
 
-      // Browse with all reference types, not just hierarchical
+      // Use HierarchicalReferences to get all hierarchical references
+      // This includes: HasComponent, HasProperty, Organizes, HasEventSource, HasNotifier, etc.
+      // But excludes type definitions (HasTypeDefinition) and other non-hierarchical references
       const browseDescription = {
         nodeId: nodeId,
         browseDirection: BrowseDirection.Forward,
-        referenceTypeId: null, // null means all reference types
-        includeSubtypes: true,
+        referenceTypeId: resolveNodeId("HierarchicalReferences"), // Get all hierarchical references
+        includeSubtypes: true, // Include all subtypes of HierarchicalReferences
         nodeClassMask: 0, // 0 means all node classes
         resultMask: 0x3F  // All attributes (BrowseName, DisplayName, NodeClass, etc.)
       };
@@ -310,9 +313,9 @@ class OPCUAClientManager {
           referenceTypeId: ref.referenceTypeId?.toString()
         };
         
-        // Log first 5 nodes for debugging
-        if (index < 5) {
-          logger.info(`Node ${index}: ${JSON.stringify(node)}`);
+        // Log first 10 nodes for debugging
+        if (index < 10) {
+          logger.info(`Node ${index}: ${node.displayName} (${node.nodeClass}) - ${node.nodeId}`);
         }
         
         return node;
@@ -327,6 +330,7 @@ class OPCUAClientManager {
       };
     } catch (error) {
       logger.error('Browse error:', error);
+      logger.error('Browse error stack:', error.stack);
       throw error;
     }
   }
