@@ -403,12 +403,12 @@ class OPCUAClientManager {
       
       // Try common starting points
       const startingPoints = [
-        { nodeId: 'ObjectsFolder', path: 'Objects' },
-        { nodeId: 'ns=3;s=DataBlocksGlobal', path: 'DataBlocksGlobal' },
+        { nodeId: 'ObjectsFolder', path: 'Objects', breadcrumb: [{ nodeId: 'ObjectsFolder', displayName: 'Objects' }] },
+        { nodeId: 'ns=3;s=DataBlocksGlobal', path: 'DataBlocksGlobal', breadcrumb: [{ nodeId: 'ObjectsFolder', displayName: 'Objects' }, { nodeId: 'ns=3;s=DataBlocksGlobal', displayName: 'DataBlocksGlobal' }] },
       ];
 
       // Helper function to recursively search in nodes
-      const searchInNode = async (nodeId, currentPath, depth = 0) => {
+      const searchInNode = async (nodeId, currentPath, currentBreadcrumb, depth = 0) => {
         if (depth > 3) return; // Limit depth to avoid long searches
         
         try {
@@ -423,9 +423,12 @@ class OPCUAClientManager {
             if (matchesSearch) {
               // Get children of matched node
               const children = await this.browseNodes(node.nodeId);
+              const nodeBreadcrumb = [...currentBreadcrumb, { nodeId: node.nodeId, displayName: node.displayName }];
+              
               results.push({
                 ...node,
                 path: `${currentPath}.${node.displayName}`,
+                breadcrumb: nodeBreadcrumb,
                 children: children.success ? children.nodes : []
               });
             }
@@ -434,7 +437,8 @@ class OPCUAClientManager {
             const nodeClassStr = node.nodeClass?.toString() || '';
             const isObject = nodeClassStr === 'Object' || nodeClassStr === '1';
             if (isObject && depth < 2) {
-              await searchInNode(node.nodeId, `${currentPath}.${node.displayName}`, depth + 1);
+              const nodeBreadcrumb = [...currentBreadcrumb, { nodeId: node.nodeId, displayName: node.displayName }];
+              await searchInNode(node.nodeId, `${currentPath}.${node.displayName}`, nodeBreadcrumb, depth + 1);
             }
           }
         } catch (err) {
@@ -449,12 +453,14 @@ class OPCUAClientManager {
           if (translateResult.success) {
             const browseResult = await this.browseNodes(translateResult.nodeId);
             if (browseResult.success) {
+              const resultBreadcrumb = [...start.breadcrumb, { nodeId: translateResult.nodeId, displayName: searchTerm }];
               results.push({
                 nodeId: translateResult.nodeId,
                 displayName: searchTerm,
                 browseName: searchTerm,
                 nodeClass: 'Object',
                 path: `${start.path}.${searchTerm}`,
+                breadcrumb: resultBreadcrumb,
                 children: browseResult.nodes
               });
             }
@@ -467,7 +473,7 @@ class OPCUAClientManager {
       // If no exact match, search recursively
       if (results.length === 0) {
         for (const start of startingPoints) {
-          await searchInNode(start.nodeId, start.path, 0);
+          await searchInNode(start.nodeId, start.path, start.breadcrumb, 0);
         }
       }
 
