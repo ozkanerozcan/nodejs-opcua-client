@@ -179,6 +179,16 @@ class OPCUAClientManager {
       }
     } catch (error) {
       logger.error('Read error:', error);
+      
+      // If read fails due to connection issue, mark as disconnected
+      if (error.message.includes('BadSessionClosed') || 
+          error.message.includes('BadConnectionClosed') ||
+          error.message.includes('ECONNREFUSED') ||
+          error.message.includes('ETIMEDOUT')) {
+        this.isConnected = false;
+        this.handleConnectionLost('Read operation failed - connection lost');
+      }
+      
       throw error;
     }
   }
@@ -504,6 +514,16 @@ class OPCUAClientManager {
       }
     } catch (error) {
       logger.error('Read registered node error:', error);
+      
+      // If read fails due to connection issue, mark as disconnected
+      if (error.message.includes('BadSessionClosed') || 
+          error.message.includes('BadConnectionClosed') ||
+          error.message.includes('ECONNREFUSED') ||
+          error.message.includes('ETIMEDOUT')) {
+        this.isConnected = false;
+        this.handleConnectionLost('Read registered operation failed - connection lost');
+      }
+      
       throw error;
     }
   }
@@ -757,14 +777,53 @@ class OPCUAClientManager {
   }
 
   /**
-   * Get connection status
+   * Get connection status with real connection test
    */
-  getStatus() {
-    return {
-      connected: this.isConnected,
-      endpoint: this.connectionConfig?.endpoint || null,
-      sessionActive: this.session !== null
-    };
+  async getStatus() {
+    // First check basic flags
+    if (!this.isConnected || !this.session) {
+      return {
+        connected: false,
+        endpoint: this.connectionConfig?.endpoint || null,
+        sessionActive: false
+      };
+    }
+
+    // Perform actual connection test by reading Server Status
+    try {
+      const testRead = await this.session.read({
+        nodeId: 'i=2259', // Server_ServerStatus_State
+        attributeId: AttributeIds.Value
+      });
+
+      if (testRead.statusCode.isGood()) {
+        return {
+          connected: true,
+          endpoint: this.connectionConfig?.endpoint || null,
+          sessionActive: true
+        };
+      } else {
+        // If read failed, connection is lost
+        logger.warn('Connection test failed:', testRead.statusCode.toString());
+        this.isConnected = false;
+        this.handleConnectionLost('Connection test failed');
+        return {
+          connected: false,
+          endpoint: this.connectionConfig?.endpoint || null,
+          sessionActive: false
+        };
+      }
+    } catch (error) {
+      // If any error occurs, connection is lost
+      logger.error('Connection test error:', error.message);
+      this.isConnected = false;
+      this.handleConnectionLost('Connection test error');
+      return {
+        connected: false,
+        endpoint: this.connectionConfig?.endpoint || null,
+        sessionActive: false
+      };
+    }
   }
 
   /**

@@ -63,16 +63,18 @@ router.post('/disconnect', async (req, res) => {
 
 /**
  * GET /api/opcua/status
- * Get connection status
+ * Get connection status with real connection test
  */
-router.get('/status', (req, res) => {
+router.get('/status', async (req, res) => {
   try {
-    const status = opcuaClient.getStatus();
+    const status = await opcuaClient.getStatus();
     res.json(status);
   } catch (error) {
     logger.error('Status endpoint error:', error);
     res.status(500).json({
-      success: false,
+      connected: false,
+      endpoint: null,
+      sessionActive: false,
       error: error.message
     });
   }
