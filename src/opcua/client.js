@@ -265,32 +265,35 @@ class OPCUAClientManager {
    */
   async browseNodes(nodeId = 'RootFolder') {
     try {
-      if (!this.isConnected || !this.session) {
-        throw new Error('Not connected to PLC');
-      }
-
+      if (!this.isConnected || !this.session) throw new Error('Not connected to PLC');
       logger.info(`Browsing node: ${nodeId}`);
 
-      // Use HierarchicalReferences to get all hierarchical references
-      // This includes: HasComponent, HasProperty, Organizes, HasEventSource, HasNotifier, etc.
-      // But excludes type definitions (HasTypeDefinition) and other non-hierarchical references
       const browseDescription = {
-        nodeId: nodeId,
+        nodeId,
         browseDirection: BrowseDirection.Forward,
-        referenceTypeId: resolveNodeId("HierarchicalReferences"), // Get all hierarchical references
-        includeSubtypes: true, // Include all subtypes of HierarchicalReferences
-        nodeClassMask: 0, // 0 means all node classes
-        resultMask: 0x3F  // All attributes (BrowseName, DisplayName, NodeClass, etc.)
+        referenceTypeId: resolveNodeId("HierarchicalReferences"),
+        includeSubtypes: true,
+        nodeClassMask: 0,
+        resultMask: 0x3F
       };
 
-      const browseResult = await this.session.browse(browseDescription);
-      
-      logger.info(`Raw browse result status: ${browseResult.statusCode.toString()}`);
-      logger.info(`Raw references count: ${browseResult.references?.length || 0}`);
-      
-      // Helper function to convert NodeClass enum to string
+      const allReferences = [];
+      let browseResult = await this.session.browse(browseDescription);
+      logger.info(`Browse status: ${browseResult.statusCode.toString()} refs: ${browseResult.references?.length || 0}`);
+      if (browseResult.references) allReferences.push(...browseResult.references);
+      let cp = browseResult.continuationPoint;
+      let safetyCounter = 0;
+      while (cp && cp.length && safetyCounter < 20) {
+        const next = await this.session.browseNext(cp, false);
+        logger.info(`browseNext refs: ${next.references?.length || 0}`);
+        if (next.references) allReferences.push(...next.references);
+        cp = next.continuationPoint;
+        safetyCounter++;
+      }
+      if (cp && cp.length) logger.warn('Remaining continuationPoint not fully read (limit reached)');
+
       const getNodeClassName = (nodeClass) => {
-        const nodeClassMap = {
+        const map = {
           [NodeClass.Object]: 'Object',
           [NodeClass.Variable]: 'Variable',
           [NodeClass.Method]: 'Method',
@@ -300,10 +303,10 @@ class OPCUAClientManager {
           [NodeClass.DataType]: 'DataType',
           [NodeClass.View]: 'View'
         };
-        return nodeClassMap[nodeClass] || 'Unknown';
+        return map[nodeClass] || 'Unknown';
       };
-      
-      const nodes = browseResult.references.map((ref, index) => {
+
+      const nodes = allReferences.map((ref, i) => {
         const node = {
           nodeId: ref.nodeId.toString(),
           browseName: ref.browseName.toString(),
@@ -312,22 +315,13 @@ class OPCUAClientManager {
           isForward: ref.isForward,
           referenceTypeId: ref.referenceTypeId?.toString()
         };
-        
-        // Log first 10 nodes for debugging
-        if (index < 10) {
-          logger.info(`Node ${index}: ${node.displayName} (${node.nodeClass}) - ${node.nodeId}`);
-        }
-        
+        if (i < 10) logger.info(`Node ${i}: ${node.displayName} (${node.nodeClass}) - ${node.nodeId}`);
         return node;
       });
 
-      logger.info(`Browse result: Found ${nodes.length} nodes under ${nodeId}`);
-      logger.info(`All node names: ${nodes.map(n => n.displayName).join(', ')}`);
-
-      return {
-        success: true,
-        nodes: nodes
-      };
+      logger.info(`Browse result: Found ${nodes.length} total nodes under ${nodeId}`);
+      logger.info(`Names: ${nodes.map(n => n.displayName).join(', ')}`);
+      return { success: true, nodes };
     } catch (error) {
       logger.error('Browse error:', error);
       logger.error('Browse error stack:', error.stack);
