@@ -573,26 +573,50 @@ class OPCUAClientManager {
       );
 
       const subscriptionId = `sub_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
+      // Read initial value
+      let initialValue = null;
+      try {
+        const dataValue = await this.session.read({
+          nodeId: registeredId,
+          attributeId: AttributeIds.Value
+        });
+        
+        if (dataValue.statusCode.isGood()) {
+          initialValue = {
+            value: dataValue.value.value,
+            dataType: DataType[dataValue.value.dataType],
+            timestamp: dataValue.serverTimestamp || new Date().toISOString()
+          };
+        }
+      } catch (readError) {
+        logger.error('Failed to read initial value:', readError);
+      }
+      
       this.subscriptions.set(subscriptionId, {
         subscription,
         monitoredItem,
         nodeId: registeredId,
         originalNodeId: nodeInfo.originalNodeId,
-        isRegistered: true
+        isRegistered: true,
+        latestValue: initialValue
       });
 
       // Handle data changes
       monitoredItem.on('changed', (dataValue) => {
-        logger.info(`Value changed for registered node ${registeredId}:`, {
-          value: dataValue.value.value,
-          timestamp: dataValue.serverTimestamp
-        });
-        // Store latest value for polling
-        this.subscriptions.get(subscriptionId).latestValue = {
+        const newValue = {
           value: dataValue.value.value,
           dataType: DataType[dataValue.value.dataType],
           timestamp: dataValue.serverTimestamp || new Date().toISOString()
         };
+        
+        logger.info(`Value changed for registered node ${registeredId}:`, newValue);
+        
+        // Store latest value for polling
+        const sub = this.subscriptions.get(subscriptionId);
+        if (sub) {
+          sub.latestValue = newValue;
+        }
       });
 
       logger.info(`Subscription created: ${subscriptionId}`);
