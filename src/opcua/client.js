@@ -80,6 +80,34 @@ class OPCUAClientManager {
       this.session = await this.client.createSession(userIdentity);
       logger.info('OPC UA session created successfully');
 
+      // Set up session error handlers
+      this.session.on('session_closed', (statusCode) => {
+        logger.warn('Session closed:', statusCode);
+        this.isConnected = false;
+        this.handleConnectionLost('Session was closed by server');
+      });
+
+      this.session.on('keepalive', () => {
+        logger.debug('Keep-alive received');
+      });
+
+      this.session.on('keepalive_failure', () => {
+        logger.error('Keep-alive failure detected');
+        this.isConnected = false;
+        this.handleConnectionLost('Keep-alive failure - connection lost');
+      });
+
+      // Set up client error handlers
+      this.client.on('connection_lost', () => {
+        logger.error('Connection lost');
+        this.isConnected = false;
+        this.handleConnectionLost('Connection to PLC lost');
+      });
+
+      this.client.on('backoff', (retry, delay) => {
+        logger.warn(`Connection backoff: retry ${retry}, delay ${delay}ms`);
+      });
+
       this.isConnected = true;
       this.connectionConfig = config;
 
@@ -90,8 +118,20 @@ class OPCUAClientManager {
       };
     } catch (error) {
       logger.error('Connection error:', error);
+      
+      // Enhanced error messages
+      let errorMessage = error.message;
+      if (error.message.includes('keep') || error.message.includes('KeepAlive')) {
+        errorMessage = `Keep-alive error: ${error.message}. Consider increasing Keep Alive Interval in settings.`;
+        logger.error('Keep-alive configuration issue detected');
+      } else if (error.message.includes('timeout') || error.message.includes('ETIMEDOUT')) {
+        errorMessage = `Connection timeout: ${error.message}. Check network and increase timeout settings.`;
+      } else if (error.message.includes('ECONNREFUSED')) {
+        errorMessage = 'Connection refused: OPC UA server is not running or endpoint is incorrect.';
+      }
+      
       await this.cleanup();
-      throw error;
+      throw new Error(errorMessage);
     }
   }
 
@@ -244,10 +284,15 @@ class OPCUAClientManager {
         throw new Error('Not connected to PLC');
       }
 
+      // Calculate lifetime and keepalive counts based on interval
+      const publishingInterval = interval;
+      const maxKeepAliveCount = Math.max(10, Math.ceil(10000 / publishingInterval));
+      const lifetimeCount = maxKeepAliveCount * 3;
+
       const subscription = await this.session.createSubscription2({
-        requestedPublishingInterval: interval,
-        requestedLifetimeCount: 100,
-        requestedMaxKeepAliveCount: 10,
+        requestedPublishingInterval: publishingInterval,
+        requestedLifetimeCount: lifetimeCount,
+        requestedMaxKeepAliveCount: maxKeepAliveCount,
         maxNotificationsPerPublish: 100,
         publishingEnabled: true,
         priority: 10
@@ -590,14 +635,23 @@ class OPCUAClientManager {
 
       logger.info(`Subscribing to registered node: ${registeredId}, interval: ${interval}ms`);
 
+      // Calculate lifetime and keepalive counts based on interval
+      // lifetimeCount should be at least 3 times the maxKeepAliveCount
+      // and maxKeepAliveCount should accommodate the publishing interval
+      const publishingInterval = interval;
+      const maxKeepAliveCount = Math.max(10, Math.ceil(10000 / publishingInterval)); // At least 10 seconds worth
+      const lifetimeCount = maxKeepAliveCount * 3;
+
       const subscription = await this.session.createSubscription2({
-        requestedPublishingInterval: interval,
-        requestedLifetimeCount: 100,
-        requestedMaxKeepAliveCount: 10,
+        requestedPublishingInterval: publishingInterval,
+        requestedLifetimeCount: lifetimeCount,
+        requestedMaxKeepAliveCount: maxKeepAliveCount,
         maxNotificationsPerPublish: 100,
         publishingEnabled: true,
         priority: 10
       });
+
+      logger.info(`Subscription created with lifetimeCount: ${lifetimeCount}, maxKeepAliveCount: ${maxKeepAliveCount}`);
 
       const monitoredItem = await subscription.monitor(
         {
@@ -684,6 +738,22 @@ class OPCUAClientManager {
       success: true,
       value: sub.latestValue || null
     };
+  }
+
+  /**
+   * Handle connection lost event
+   */
+  handleConnectionLost(reason) {
+    logger.error('Connection lost:', reason);
+    this.isConnected = false;
+    
+    // Clean up resources
+    this.cleanup().catch(err => {
+      logger.error('Error during connection lost cleanup:', err);
+    });
+    
+    // You could emit an event here for real-time notification
+    // or use WebSocket to notify frontend immediately
   }
 
   /**
