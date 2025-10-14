@@ -7,7 +7,9 @@ const {
   ClientSession,
   DataType,
   MonitoringMode,
-  NodeClass
+  NodeClass,
+  BrowseDirection,
+  makeNodeId
 } = require('node-opcua');
 const logger = require('../utils/logger');
 
@@ -266,7 +268,22 @@ class OPCUAClientManager {
         throw new Error('Not connected to PLC');
       }
 
-      const browseResult = await this.session.browse(nodeId);
+      logger.info(`Browsing node: ${nodeId}`);
+
+      // Browse with all reference types, not just hierarchical
+      const browseDescription = {
+        nodeId: nodeId,
+        browseDirection: BrowseDirection.Forward,
+        referenceTypeId: null, // null means all reference types
+        includeSubtypes: true,
+        nodeClassMask: 0, // 0 means all node classes
+        resultMask: 0x3F  // All attributes (BrowseName, DisplayName, NodeClass, etc.)
+      };
+
+      const browseResult = await this.session.browse(browseDescription);
+      
+      logger.info(`Raw browse result status: ${browseResult.statusCode.toString()}`);
+      logger.info(`Raw references count: ${browseResult.references?.length || 0}`);
       
       // Helper function to convert NodeClass enum to string
       const getNodeClassName = (nodeClass) => {
@@ -283,18 +300,26 @@ class OPCUAClientManager {
         return nodeClassMap[nodeClass] || 'Unknown';
       };
       
-      const nodes = browseResult.references.map(ref => ({
-        nodeId: ref.nodeId.toString(),
-        browseName: ref.browseName.toString(),
-        displayName: ref.displayName?.text || ref.browseName.toString(),
-        nodeClass: getNodeClassName(ref.nodeClass),
-        isForward: ref.isForward
-      }));
+      const nodes = browseResult.references.map((ref, index) => {
+        const node = {
+          nodeId: ref.nodeId.toString(),
+          browseName: ref.browseName.toString(),
+          displayName: ref.displayName?.text || ref.browseName.toString(),
+          nodeClass: getNodeClassName(ref.nodeClass),
+          isForward: ref.isForward,
+          referenceTypeId: ref.referenceTypeId?.toString()
+        };
+        
+        // Log first 5 nodes for debugging
+        if (index < 5) {
+          logger.info(`Node ${index}: ${JSON.stringify(node)}`);
+        }
+        
+        return node;
+      });
 
       logger.info(`Browse result: Found ${nodes.length} nodes under ${nodeId}`);
-      if (nodes.length > 0) {
-        logger.info(`First node sample: ${JSON.stringify(nodes[0])}`);
-      }
+      logger.info(`All node names: ${nodes.map(n => n.displayName).join(', ')}`);
 
       return {
         success: true,
