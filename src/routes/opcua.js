@@ -372,4 +372,25 @@ router.get('/subscription-value/:subscriptionId', (req, res) => {
   }
 });
 
+/**
+ * GET /api/opcua/active-subscriptions
+ * Get list of all active subscriptions
+ */
+router.get('/active-subscriptions', (req, res) => {
+  try {
+    const subscriptions = opcuaClient.getActiveSubscriptions();
+    res.json({
+      success: true,
+      subscriptions: subscriptions,
+      count: subscriptions.length
+    });
+  } catch (error) {
+    logger.error('Get active subscriptions endpoint error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 module.exports = router;

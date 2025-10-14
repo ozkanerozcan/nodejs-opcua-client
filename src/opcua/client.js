@@ -535,6 +535,23 @@ class OPCUAClientManager {
   }
 
   /**
+   * Get all active subscriptions
+   */
+  getActiveSubscriptions() {
+    const subs = [];
+    for (const [subscriptionId, info] of this.subscriptions) {
+      subs.push({
+        subscriptionId: subscriptionId,
+        nodeId: info.nodeId,
+        originalNodeId: info.originalNodeId,
+        isRegistered: info.isRegistered || false,
+        latestValue: info.latestValue || null
+      });
+    }
+    return subs;
+  }
+
+  /**
    * Subscribe to a registered node (for real-time monitoring)
    */
   async subscribeRegisteredNode(registeredId, interval = 1000) {
