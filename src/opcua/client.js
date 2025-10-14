@@ -10,7 +10,9 @@ const {
   NodeClass,
   BrowseDirection,
   makeNodeId,
-  resolveNodeId
+  resolveNodeId,
+  makeBrowsePath,
+  BrowsePath
 } = require('node-opcua');
 const logger = require('../utils/logger');
 
@@ -325,6 +327,135 @@ class OPCUAClientManager {
     } catch (error) {
       logger.error('Browse error:', error);
       logger.error('Browse error stack:', error.stack);
+      throw error;
+    }
+  }
+
+  /**
+   * Translate browse path to NodeId
+   * Search for nodes by browseName path (e.g., "Objects.DataBlocksGlobal.DB_Data")
+   */
+  async translateBrowsePath(browsePath, startingNode = 'ObjectsFolder') {
+    try {
+      if (!this.isConnected || !this.session) throw new Error('Not connected to PLC');
+      
+      logger.info(`Translating browse path: ${browsePath} from ${startingNode}`);
+      
+      // Split path into segments (e.g., "DataBlocksGlobal.DB_Data" -> ["DataBlocksGlobal", "DB_Data"])
+      const pathSegments = browsePath.split('.').filter(s => s.trim());
+      
+      if (pathSegments.length === 0) {
+        throw new Error('Invalid browse path');
+      }
+
+      // Build BrowsePath request
+      const browsePathRequest = {
+        startingNode: startingNode,
+        relativePath: {
+          elements: pathSegments.map(segment => ({
+            referenceTypeId: resolveNodeId("HierarchicalReferences"),
+            isInverse: false,
+            includeSubtypes: true,
+            targetName: { namespaceIndex: 3, name: segment } // ns=3 for S7-1500 user data
+          }))
+        }
+      };
+
+      const result = await this.session.translateBrowsePath([browsePathRequest]);
+      
+      if (!result || result.length === 0) {
+        return { success: false, error: 'No results from translate' };
+      }
+
+      const firstResult = result[0];
+      logger.info(`Translate result status: ${firstResult.statusCode.toString()}`);
+      
+      if (firstResult.statusCode.isGood() && firstResult.targets && firstResult.targets.length > 0) {
+        const targetNodeId = firstResult.targets[0].targetId.toString();
+        logger.info(`Found node: ${targetNodeId}`);
+        return { 
+          success: true, 
+          nodeId: targetNodeId,
+          targets: firstResult.targets.map(t => t.targetId.toString())
+        };
+      } else {
+        return { 
+          success: false, 
+          error: `Path not found: ${firstResult.statusCode.toString()}` 
+        };
+      }
+    } catch (error) {
+      logger.error('Translate browse path error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Search nodes by name (searches from multiple starting points)
+   */
+  async searchNodesByName(searchTerm) {
+    try {
+      if (!this.isConnected || !this.session) throw new Error('Not connected to PLC');
+      
+      logger.info(`Searching for nodes matching: ${searchTerm}`);
+      const results = [];
+      
+      // Try common starting points
+      const startingPoints = [
+        { nodeId: 'ObjectsFolder', path: 'Objects' },
+        { nodeId: 'ns=3;s=DataBlocksGlobal', path: 'DataBlocksGlobal' },
+      ];
+
+      // Try direct path translation first
+      for (const start of startingPoints) {
+        try {
+          const translateResult = await this.translateBrowsePath(searchTerm, start.nodeId);
+          if (translateResult.success) {
+            // Browse the found node to get its details
+            const browseResult = await this.browseNodes(translateResult.nodeId);
+            if (browseResult.success) {
+              results.push({
+                nodeId: translateResult.nodeId,
+                displayName: searchTerm,
+                browseName: searchTerm,
+                nodeClass: 'Object',
+                path: `${start.path}.${searchTerm}`,
+                children: browseResult.nodes
+              });
+            }
+          }
+        } catch (err) {
+          logger.warn(`Search failed at ${start.path}:`, err.message);
+        }
+      }
+
+      // If direct path didn't work, try searching in DataBlocksGlobal
+      if (results.length === 0) {
+        try {
+          const dbResult = await this.browseNodes('ns=3;s=DataBlocksGlobal');
+          if (dbResult.success) {
+            const matched = dbResult.nodes.filter(node => 
+              node.displayName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+              node.browseName.toLowerCase().includes(searchTerm.toLowerCase())
+            );
+            
+            for (const node of matched) {
+              const children = await this.browseNodes(node.nodeId);
+              results.push({
+                ...node,
+                path: `DataBlocksGlobal.${node.displayName}`,
+                children: children.success ? children.nodes : []
+              });
+            }
+          }
+        } catch (err) {
+          logger.warn('Search in DataBlocksGlobal failed:', err.message);
+        }
+      }
+
+      return { success: true, results };
+    } catch (error) {
+      logger.error('Search nodes error:', error);
       throw error;
     }
   }

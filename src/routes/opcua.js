@@ -151,6 +151,32 @@ router.post('/browse', async (req, res) => {
 });
 
 /**
+ * POST /api/opcua/search
+ * Search for nodes by name
+ */
+router.post('/search', async (req, res) => {
+  try {
+    const { searchTerm } = req.body;
+    
+    if (!searchTerm) {
+      return res.status(400).json({
+        success: false,
+        error: 'searchTerm is required'
+      });
+    }
+
+    const result = await opcuaClient.searchNodesByName(searchTerm);
+    res.json(result);
+  } catch (error) {
+    logger.error('Search endpoint error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to search nodes'
+    });
+  }
+});
+
+/**
  * POST /api/opcua/subscribe
  * Subscribe to variable changes
  */
