@@ -29,6 +29,7 @@ app.use(cors({
     if (allowedOrigins.indexOf(origin) !== -1 || 
         origin.includes('localhost') || 
         origin.includes('ozkanerozcan.com')) {
+      logger.info(`CORS allowed origin: ${origin}`);
       callback(null, true);
     } else {
       logger.warn(`CORS blocked origin: ${origin}`);
@@ -38,9 +39,23 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
   credentials: true,
+  exposedHeaders: ['Content-Length', 'Content-Type'],
+  maxAge: 86400, // 24 hours
   optionsSuccessStatus: 200,
   preflightContinue: false
 }));
+
+// Additional CORS headers for extra compatibility
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && (allowedOrigins.indexOf(origin) !== -1 || origin.includes('ozkanerozcan.com'))) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept');
+  }
+  next();
+});
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -52,6 +67,9 @@ app.use((req, res, next) => {
   });
   next();
 });
+
+// Handle preflight for all routes
+app.options('*', cors());
 
 // Routes
 app.use('/api/opcua', opcuaRoutes);
@@ -71,11 +89,14 @@ app.get('/api/test-cors', (req, res) => {
     success: true,
     message: 'CORS is working!',
     origin: req.headers.origin || 'No origin header',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    headers: {
+      'access-control-allow-origin': res.getHeader('access-control-allow-origin'),
+      'access-control-allow-methods': res.getHeader('access-control-allow-methods'),
+      'access-control-allow-headers': res.getHeader('access-control-allow-headers'),
+    }
   });
 });
-
-app.options('/api/opcua/*', cors()); // Enable pre-flight for all opcua routes
 
 // Root endpoint
 app.get('/', (req, res) => {
