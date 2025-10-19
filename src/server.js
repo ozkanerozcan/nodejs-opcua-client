@@ -10,15 +10,36 @@ const PORT = process.env.PORT || 3000;
 // CORS configuration
 const allowedOrigins = process.env.ALLOWED_ORIGINS 
   ? process.env.ALLOWED_ORIGINS.split(',')
-  : ['http://localhost:8081', 'http://localhost:19000', 'http://localhost:19001', 'http://localhost:19006'];
+  : [
+      'http://localhost:8081', 
+      'http://localhost:19000', 
+      'http://localhost:19001', 
+      'http://localhost:19006',
+      'https://opcread.ozkanerozcan.com',
+      'http://opcread.ozkanerozcan.com'
+    ];
 
-// Middleware
+// Middleware - Enhanced CORS with function for dynamic origin checking
 app.use(cors({
-  origin: allowedOrigins,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps, curl, postman)
+    if (!origin) return callback(null, true);
+    
+    // Check if origin is in allowed list or matches pattern
+    if (allowedOrigins.indexOf(origin) !== -1 || 
+        origin.includes('localhost') || 
+        origin.includes('ozkanerozcan.com')) {
+      callback(null, true);
+    } else {
+      logger.warn(`CORS blocked origin: ${origin}`);
+      callback(null, true); // Still allow for development - remove in production
+    }
+  },
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
   credentials: true,
-  optionsSuccessStatus: 200
+  optionsSuccessStatus: 200,
+  preflightContinue: false
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -43,6 +64,18 @@ app.get('/health', (req, res) => {
     uptime: process.uptime()
   });
 });
+
+// CORS test endpoint
+app.get('/api/test-cors', (req, res) => {
+  res.json({
+    success: true,
+    message: 'CORS is working!',
+    origin: req.headers.origin || 'No origin header',
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.options('/api/opcua/*', cors()); // Enable pre-flight for all opcua routes
 
 // Root endpoint
 app.get('/', (req, res) => {
